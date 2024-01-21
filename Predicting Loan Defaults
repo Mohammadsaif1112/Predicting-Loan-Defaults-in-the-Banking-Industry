@@ -1,0 +1,135 @@
+# Importing Libraries
+import pandas as pd, numpy as np, plotly.express as px, matplotlib.pyplot as plt, seaborn as sns
+from plotly.offline import init_notebook_mode
+init_notebook_mode(connected=True)
+
+# Exploratory Data Analysis
+# Loading data and visualizing dataframe
+df = pd.read_csv('../input/loan-default-prediction/Default_Fin.csv')
+df
+# Checking null values 
+df.isnull().sum()
+# Renaming target variable
+df.rename({'Defaulted?':'Defaulted'}, axis = 1, inplace = True)
+df
+# Checking class balance
+fig = px.pie(df, values = df['Defaulted'].value_counts(), names = ['Did not default','Defaulted'], title = 'Distribution of Clients Who Have Defaulted')
+fig.update_traces(rotation=90, pull = [0.2,0.06,0.06,0.06,0.06], textinfo = "percent+label")
+fig.show()
+
+# Separating df into two different groups: Employed clients and unemployed clients
+employed = df.query("Employed == 1")
+unemployed = df.query("Employed == 0")
+
+# Checking class balance among those who are employed
+fig = px.pie(employed, values = employed['Defaulted'].value_counts(), names = ['Did not default','Defaulted'], title = 'Distribution of Clients Who Are Employed and Defaulted')
+fig.update_traces(rotation=90, pull = [0.2,0.06,0.06,0.06,0.06], textinfo = "percent+label")
+fig.show()
+# Checking class balance among those who are unemployed
+fig = px.pie(unemployed, values = unemployed['Defaulted'].value_counts(), names = ['Did not default','Defaulted'], title = 'Distribution of Clients Who Are Unemployed and Defaulted')
+fig.update_traces(rotation=90, pull = [0.2,0.06,0.06,0.06,0.06], textinfo = "percent+label")
+fig.show()
+
+# Default distribution according to bank balance values
+fig = plt.figure(figsize = (20, 9))
+sns.set_style("dark")
+sns.kdeplot(df[df['Defaulted']==1]['Bank Balance'])
+sns.kdeplot(df[df['Defaulted']==0]['Bank Balance'])
+plt.title('Default x Bank Balance')
+plt.legend(labels=['Defaulted', 'Did Not Default'])
+plt.show()
+
+# Default distribution according to annual salaries
+fig = plt.figure(figsize = (20, 9))
+sns.set_style("dark")
+sns.kdeplot(df[df['Defaulted']==1]['Annual Salary'])
+sns.kdeplot(df[df['Defaulted']==0]['Annual Salary'])
+plt.title('Default x Annual Salaries')
+plt.legend(labels=['Defaulted', 'Did Not Default'])
+plt.show()
+
+# Checking correlations
+corr = df.corr()
+plt.figure(figsize = (16, 12))
+g = sns.heatmap(df.corr(), annot = True)
+
+# Building a Model to Predict Loan Default
+test = df.tail(2000) # 20% of dataset will be used for testing
+test
+# Removing testing data from dataframe and setting up 80% of data left for training and validation
+train = df.drop(test.index)
+train
+
+# Importing PyCaret's classification lib
+from pycaret.classification import *
+setup(# Defining training data
+     data = train, 
+     # defining target variable
+     target = 'Defaulted',
+     # 75% of training set will be used for training, 25% will be used for validation while on hold-out
+     train_size = 0.75,
+     # Ignore index, it won't be any relevant for model building
+     ignore_features = ['Index'],
+     # This param fixes class imablance with SMOTE technique, increasing the minority class
+     fix_imbalance = True,
+     # Normalizing features to have them all on a the same scale,
+     normalize = True,
+     # Transforming features into a Gaussian-like distribution)
+     transformation = True)
+# I will now run a bunch of different classification algorithms and rank them by their recall score
+compare_models(sort = 'Recall')
+ridge = create_model('ridge')
+lda = create_model('lda')
+qda = create_model('qda')
+
+# Blending models 
+blended_model = blend_models(estimator_list = [ridge, lda, qda],
+                            fold = 10,
+                            optimize = 'Recall',
+                            choose_better = True)
+tuned_ridge = tune_model(ridge,
+                        n_iter = 1000,
+                        optimize = 'Recall',
+                        choose_better = True)
+tuned_lda = tune_model(lda,
+                        n_iter = 1000,
+                        optimize = 'Recall',
+                        choose_better = True)
+tuned_qda = tune_model(qda,
+                        n_iter = 1000,
+                        optimize = 'Recall',
+                        choose_better = True)
+
+plot_model(tuned_qda, plot = 'confusion_matrix')
+plot_model(tuned_ridge, plot = 'confusion_matrix')
+plot_model(tuned_lda, plot = 'confusion_matrix')
+plot_model(tuned_ridge, plot = 'feature')
+plot_model(tuned_lda, plot = 'feature')
+predict_model(tuned_qda)
+
+# Finalizing model before testing it with unseen data
+model = finalize_model(tuned_qda)
+print(model) # Printing final model
+
+test # testing set
+
+predictions = predict_model(model, data = test)
+predictions
+
+# Print a confusion matrix
+y_test = predictions.Defaulted
+pred = predictions.Label
+y_test.value_counts()
+
+from sklearn.metrics import confusion_matrix
+cm = confusion_matrix(y_test, pred)
+plt.figure(figsize=(12,9))
+ax = plt.subplot()
+sns.heatmap(cm,annot = True, fmt ='g', ax = ax)
+ax.set_xlabel('Predicted Class')
+ax.set_ylabel('True Class')
+ax.set_title('Confusion Matrix')
+ax.xaxis.set_ticklabels(['Non-Defaulter','Defaulter'])
+ax.yaxis.set_ticklabels(['Non-Defaulter','Defaulter'])
+plt.show()
+
